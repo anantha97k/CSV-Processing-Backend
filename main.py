@@ -2,83 +2,25 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from test import q
-from qq import queue_file
-from typing import List
+from queue_conn import task_queue
+from async_queue import async_tasks
 import asyncio
-from redis import Redis
 from typing import AsyncGenerator
 
 
-pub = Redis()
-
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        try:
-            await websocket.send_text(message)
-        except Exception as e:
-            print(f"Error sending message: {e}")
-            self.disconnect(websocket)
-
-    async def broadcast(self, message: dict):
-        disconnected = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                disconnected.append(connection)
-
-        for connection in disconnected:
-            self.disconnect(connection)
-
+from websocket_conn import ConnectionManager
+from redis_pubsub import redis_listener, pub
 
 manager = ConnectionManager()
-
-
-async def redis_listener():
-    pubsub = pub.pubsub()
-    pubsub.subscribe('processing', 'completed')
-    while True:
-        message = pubsub.get_message()
-        if message and message['type'] == 'message':
-            try:
-                data = message['data']
-                data = data.decode('utf-8')
-                if message['channel'] == b'processing':
-                    response = {
-                        'status' : 'processing',
-                        'filename' : data
-                    }
-                    await manager.broadcast(response)
-                elif message['channel'] == b'completed' :
-                    response = {
-                        'status' : 'completed',
-                        'filename' : data
-                    }
-                    await manager.broadcast(response)   
-            except BaseException:
-                pass
-        await asyncio.sleep(10)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # app startup
-    asyncio.create_task(redis_listener())
+    asyncio.create_task(redis_listener(manager))
     yield
     # app teardown
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -96,35 +38,32 @@ app.add_middleware(
 
 def success(job, connection, result):
     # f.enqueue(db.db_insert, result)
-    pub.publish('processing', job.id)
+    pub.publish("processing", f"{job.id}.csv")
 
 
 @app.post("/file")
 async def file_read(file: UploadFile):
+
     try:
-        job = q.enqueue(
-            queue_file.file_process,
+        task_queue.enqueue(
+            async_tasks.file_process,
             file.file,
             file.filename,
             on_success=success,
-            job_id=file.filename,
+            job_id=file.filename.split(".")[0],
         )
 
         return JSONResponse(
             content={
                 "status": "pending",
                 "message": "File queued for processing",
-                "filename": file.filename
+                "filename": file.filename,
             },
-            status_code=202
+            status_code=202,
         )
     except Exception as e:
         return JSONResponse(
-            content={
-                "status": "error",
-                "message": str(e)
-            },
-            status_code=500
+            content={"status": "error", "message": str(e)}, status_code=500
         )
 
 
