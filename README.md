@@ -28,7 +28,7 @@ A backend service for handling file uploads asynchronously, with real-time job s
 ### Installation
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### Running Redis
@@ -77,19 +77,3 @@ Connect to receive real-time job status events.
 | `progress` | Processing update with percentage |
 | `done` | Job completed successfully |
 | `failed` | Job encountered an error |
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
-| `UPLOAD_DIR` | `./uploads` | Local file storage path |
-| `DATABASE_URL` | — | Database connection string |
-
-## License
-
-MIT
-
-
-
-
